@@ -1,21 +1,49 @@
 
 import streamlit as st
 from PIL import Image
+import pandas as pd
 
-# Load and display the logo
-st.set_page_config(layout="wide")
+# Set layout
+st.set_page_config(layout="centered")
+
+# Load and display logo
 logo = Image.open("mbp_logo.png")
-st.image(logo, use_column_width=False, width=180)
+st.image(logo, width=180)
 
-st.title("Moneyball Phil: Daily Hit Tracker")
+# Title
+st.title("Moneyball Phil: Daily Hit Probability Simulator")
 
-# Example input fields
-player = st.text_input("Player Name")
-avg = st.number_input("Season AVG", format="%.3f")
-odds = st.text_input("Odds (e.g., -150)")
-submit = st.button("Calculate")
+# Create session state for hit board
+if "hit_board" not in st.session_state:
+    st.session_state.hit_board = []
 
-if submit:
-    st.success(f"Processing hit probability for {player}...")
-    # Placeholder for backend logic
-    st.info("Calculation result will go here.")
+# Input fields (vertically stacked)
+player_name = st.text_input("Player Name")
+last7 = st.number_input("Last 7 Days AVG", format="%.3f", step=0.001)
+vs_pitcher = st.number_input("AVG vs Pitcher", format="%.3f", step=0.001)
+home_away = st.number_input("Home/Away AVG", format="%.3f", step=0.001)
+vs_handedness = st.number_input("AVG vs Handedness", format="%.3f", step=0.001)
+season_avg = st.number_input("Season AVG", format="%.3f", step=0.001)
+odds = st.text_input("Sportsbook Odds (e.g., -145)")
+
+# Automatically calculate weighted average
+weighted_avg = round((last7 * 0.30 + vs_pitcher * 0.10 + home_away * 0.20 + vs_handedness * 0.10 + season_avg * 0.30), 3)
+
+# Show weighted avg in its own box
+st.markdown(f"### 📊 Weighted AVG: `{weighted_avg}`")
+
+# Analyze player
+if st.button("Analyze Player"):
+    st.success(f"{player_name} analyzed and added to the Hit Board.")
+    st.session_state.hit_board.append({
+        "Player": player_name,
+        "Weighted AVG": weighted_avg,
+        "Odds": odds
+    })
+
+# Display Hit Board
+if st.session_state.hit_board:
+    st.markdown("---")
+    st.subheader("📋 Live Hit Board")
+    hit_board_df = pd.DataFrame(st.session_state.hit_board)
+    st.dataframe(hit_board_df, use_container_width=True)
