@@ -1,119 +1,137 @@
+
 import streamlit as st
-import math
+import pandas as pd
+import base64
 
-# --- Helper Functions ---
-def calculate_weighted_avg(season, last7, split, pitcher_avg=None, pitcher_ab=0):
-    pitcher_weight = 0.3 if pitcher_ab >= 7 else 0.1 if pitcher_ab > 0 else 0
-    season_weight = 0.4
-    recent_weight = 0.3
-    split_weight = 0.3
+# Set page config
+st.set_page_config(layout="wide", page_title="Moneyball Phil")
 
-    total_weight = season_weight + recent_weight + split_weight + pitcher_weight
-    weighted_sum = (
-        season * season_weight +
-        last7 * recent_weight +
-        split * split_weight +
-        (pitcher_avg * pitcher_weight if pitcher_avg is not None else 0)
-    )
-    return weighted_sum / total_weight
+# Load logo
+st.image("moneyball_logo.png", width=160)
 
-def binomial_hit_probability(avg, ab=4):
-    prob_no_hit = (1 - avg) ** ab
-    return 1 - prob_no_hit
+# Set custom background
+def set_background(image_file):
+    with open(image_file, "rb") as f:
+        data = f.read()
+    encoded = base64.b64encode(data).decode()
+    page_bg_img = f'''
+    <style>
+    .stApp {{
+      background-image: url("data:image/png;base64,{encoded}");
+      background-size: cover;
+      background-position: center;
+    }}
+    </style>
+    '''
+    st.markdown(page_bg_img, unsafe_allow_html=True)
 
-def american_to_implied(odds):
-    if odds < 0:
-        return abs(odds) / (abs(odds) + 100)
-    else:
-        return 100 / (odds + 100)
+set_background("baseball_diamond_bg.png")
 
-def calculate_parlay_probability(p1, p2):
-    return p1 * p2
-
-# --- Session State ---
-if 'players' not in st.session_state:
-    st.session_state.players = []
-
-# --- Title ---
-st.image("logo.png", width=160)
 st.title("💰 Moneyball Phil: Daily Hit Probability Simulator")
 
-# --- Player Stat Input ---
-st.header("📥 Player Stat Input")
-with st.form("player_input_form"):
-    name = st.text_input("Player Name")
-    season_avg = st.number_input("Season AVG", min_value=0.0, max_value=1.0, step=0.0001, format="%.4f")
-    last7_avg = st.number_input("Last 7 Days AVG", min_value=0.0, max_value=1.0, step=0.0001, format="%.4f")
-    split_avg = st.number_input("Home/Away or vs AL/NL AVG", min_value=0.0, max_value=1.0, step=0.0001, format="%.4f")
-    pitcher_avg = st.number_input("Batter’s AVG vs Starting Pitcher", min_value=0.0, max_value=1.0, step=0.0001, format="%.4f")
-    pitcher_ab = st.number_input("At-Bats vs Pitcher", min_value=0, step=1)
-    odds = st.number_input("Sportsbook Odds (American)", step=1)
+# Input section
+st.subheader("🔢 Player Stats Input")
+col1, col2, col3 = st.columns(3)
 
-    weighted_avg = calculate_weighted_avg(season_avg, last7_avg, split_avg, pitcher_avg, pitcher_ab)
-    st.markdown(f"**Weighted Batting Average:** {weighted_avg}")
+with col1:
+    player_name = st.text_input("Player Name")
+    season_avg = st.number_input("Season AVG", format="%.4f")
+    last7_avg = st.number_input("Last 7 Days AVG", format="%.4f")
+    vs_team_avg = st.number_input("AVG vs Opponent Team", format="%.4f")
 
-    submit = st.form_submit_button("Simulate Player")
+with col2:
+    pitcher_hand = st.selectbox("Pitcher's Handedness", ["L", "R"])
+    batter_vs_hand_avg = st.number_input("Batter AVG vs Handedness", format="%.4f")
+    batter_vs_pitcher_avg = st.number_input("AVG vs Pitcher", format="%.4f")
+    lineup_slot = st.number_input("Lineup Position (1-9)", min_value=1, max_value=9)
 
-    if submit:
-        true_hit_prob = binomial_hit_probability(weighted_avg)
-        implied_prob = american_to_implied(odds)
-        ev = (true_hit_prob - implied_prob) * 100
-        zone = "Elite" if true_hit_prob > 0.8 else "Strong" if true_hit_prob > 0.7 else "Moderate" if true_hit_prob > 0.6 else "Bad"
+with col3:
+    implied_probability = st.number_input("Implied Probability (%)", min_value=0.0, max_value=100.0)
 
-        st.session_state.players.append({
-            "name": name,
-            "prob": round(true_hit_prob * 100, 1),
-            "zone": zone,
-            "ev": round(ev, 1),
-            "odds": odds,
-            "implied": round(implied_prob * 100, 1)
-        })
+# Calculate weighted average
+weighted_avg = (
+    0.4 * season_avg +
+    0.25 * last7_avg +
+    0.1 * vs_team_avg +
+    0.15 * batter_vs_hand_avg +
+    0.1 * batter_vs_pitcher_avg
+)
 
-# --- Top Hit Board ---
-st.header("🔥 Top Hit Board")
-if not st.session_state.players:
-    st.info("No players simulated yet.")
-else:
-    sorted_players = sorted(st.session_state.players, key=lambda x: x['prob'], reverse=True)
-    st.table([
-        {
-            "Rank": i+1,
-            "Player": p["name"],
-            "True Hit Probability": f"{p['prob']}%",
-            "Zone": p["zone"]
-        } for i, p in enumerate(sorted_players)
-    ])
+# Binomial hit probability
+ab = 4
+hit_prob = 1 - (1 - weighted_avg) ** ab
+ev = (hit_prob * 100) - implied_probability
+true_pct = round(hit_prob * 100, 2)
+implied_pct = implied_probability
 
-# --- Parlay Builder ---
-st.header("🧮 Parlay Builder")
-st.caption("Select 2 players from the Top Hit Board to calculate parlay EV vs sportsbook odds.")
-
-if len(st.session_state.players) >= 2:
-    names = [p["name"] for p in st.session_state.players]
-    p1_name = st.selectbox("Select Player 1", names, key="p1")
-    p2_name = st.selectbox("Select Player 2", names, key="p2")
-    parlay_odds = st.number_input("Enter Parlay Odds (American)", step=1, key="parlay_odds")
-
-    if p1_name != p2_name:
-        player1 = next(p for p in st.session_state.players if p['name'] == p1_name)
-        player2 = next(p for p in st.session_state.players if p['name'] == p2_name)
-
-        p1_prob = player1['prob'] / 100
-        p2_prob = player2['prob'] / 100
-
-        true_parlay_prob = calculate_parlay_probability(p1_prob, p2_prob)
-        implied_parlay_prob = american_to_implied(parlay_odds)
-        ev_parlay = (true_parlay_prob - implied_parlay_prob) * 100
-
-        st.markdown(f"**True Parlay Probability:** {round(true_parlay_prob * 100, 1)}%")
-        st.markdown(f"**Implied Probability:** {round(implied_parlay_prob * 100, 1)}%")
-        st.markdown(f"**Expected Value (EV%):** {round(ev_parlay, 1)}%")
-
-        if ev_parlay > 0:
-            st.success("✅ This is a +EV Parlay!")
-        else:
-            st.error("❌ Negative EV Parlay")
+# Determine Hit Zone
+def hit_zone(prob):
+    if prob >= 80:
+        return "Elite"
+    elif prob >= 70:
+        return "Strong"
+    elif prob >= 60:
+        return "Moderate"
     else:
-        st.warning("Please select two different players.")
-else:
-    st.info("Add at least 2 players to use the Parlay Builder.")
+        return "Bad"
+
+hit_zone_label = hit_zone(true_pct)
+
+# Display results
+st.subheader("📊 Player Hit Probability")
+st.markdown(
+    f"**Player:** {player_name}<br>"
+    f"- **True Hit Probability:** {true_pct:.2f}%<br>"
+    f"- **Implied Probability:** {implied_pct:.2f}%<br>"
+    f"- **Expected Value (EV%):** {ev:.2f}%<br>"
+    f"- **Hit Zone:** {hit_zone_label}",
+    unsafe_allow_html=True
+)
+
+# Store hit board
+if "hit_board" not in st.session_state:
+    st.session_state.hit_board = []
+
+if st.button("➕ Add to Hit Board"):
+    st.session_state.hit_board.append({
+        "Player": player_name,
+        "True Probability (%)": true_pct,
+        "Implied Probability (%)": implied_pct,
+        "EV (%)": round(ev, 2),
+        "Hit Zone": hit_zone_label
+    })
+
+# Display hit board
+if st.session_state.hit_board:
+    st.subheader("🏆 Top Hit Board")
+    st.dataframe(pd.DataFrame(st.session_state.hit_board))
+
+# Parlay builder
+st.subheader("🎯 Parlay Builder (2-3 Legs)")
+selected_players = st.multiselect("Select Players from Hit Board", [p["Player"] for p in st.session_state.hit_board])
+if 2 <= len(selected_players) <= 3:
+    product = 1
+    for player in st.session_state.hit_board:
+        if player["Player"] in selected_players:
+            product *= player["True Probability (%)"] / 100
+    parlay_prob = product
+    parlay_ev = parlay_prob * 100 - sum([p["Implied Probability (%)"] for p in st.session_state.hit_board if p["Player"] in selected_players]) / len(selected_players)
+
+    # Parlay Zone
+    def parlay_zone(p):
+        if p >= 65:
+            return "Elite"
+        elif p >= 55:
+            return "Strong"
+        elif p >= 45:
+            return "Moderate"
+        else:
+            return "Bad"
+
+    st.markdown(
+        f"**Parlay True Probability:** {parlay_prob:.2%}  
+"
+        f"**Expected Value (EV%):** {parlay_ev:.2f}%  
+"
+        f"**Parlay Zone:** {parlay_zone(parlay_prob * 100)}"
+    )
