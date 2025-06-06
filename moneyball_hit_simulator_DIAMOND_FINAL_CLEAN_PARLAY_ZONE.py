@@ -1,0 +1,1 @@
+# Final app with parlay zone logic and vertical layout
